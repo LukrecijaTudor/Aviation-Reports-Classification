@@ -1,0 +1,450 @@
+{
+ "cells": [
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "Preprocessing data for all Machine Learning (ML) tasks except BERT (BERT has his own way of data preprocessing)\n",
+    " \n",
+    "Topics:\n",
+    "1. Loading raw dataset\n",
+    "2. Cleaning data\n",
+    "3. Removing acronyms\n",
+    "4. Tokenisation\n",
+    "5. Restructuring the data\n",
+    "6. TD-IDF representation and building sparse matrix\n",
+    "7. Saving prepocessed data"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 19,
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "usage: install [-bCcpSsv] [-B suffix] [-f flags] [-g group] [-m mode]\r\n",
+      "               [-o owner] file1 file2\r\n",
+      "       install [-bCcpSsv] [-B suffix] [-f flags] [-g group] [-m mode]\r\n",
+      "               [-o owner] file1 ... fileN directory\r\n",
+      "       install -d [-v] [-g group] [-m mode] [-o owner] directory ...\r\n"
+     ]
+    }
+   ],
+   "source": [
+    "!install pycld2"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 24,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import pandas as pd\n",
+    "import numpy as np\n",
+    "import pycld2 as cld2\n",
+    "import spacy\n",
+    "sp = spacy.load(\"en\")\n",
+    "sp_stopwords=sp.Defaults.stop_words\n",
+    "\n",
+    "import math"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "Loading the data"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "document = pd.read_csv(\"./DATA/qa06_all.csv\")\n",
+    "document = document.rename(columns={'qa06id': 'id', 'qa06name':'title', 'qa06wher':'location','qa06dsc':'report'})\n",
+    "document_risk = pd.read_csv(\"./DATA/qa06_only_having_risk_valuesl.csv\")\n",
+    "document_risk = document_risk.rename(columns={'qa06id': 'id', 'qa06name':'title', 'qa06wher':'location','qa06dsc':'report','ty26colo':'label','ty26fakt':'factor'})\n",
+    "\n",
+    "acronyms = pd.read_excel(\"./DATA/kratice.xlsx\")\n",
+    "acronyms = acronyms.rename(columns={'kratice':'acronym','Unnamed: 1':'replacement'})"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "document.head()"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "Few function that will help me to prepare the raw data"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 8,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def union (list1, list2):\n",
+    "    final_list = list(set(list1) | set(list2)) \n",
+    "    return final_list \n",
+    "\n",
+    "def isNaN(string):\n",
+    "    return string != string"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "A function that will replace all the acronyms in the reports. Going through reports, I found the most important set of acronmys for each meaningful term <br>(e.g. rnw or rny for runway)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 9,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def acronyms_to_words (txt): \n",
+    "    for i in range (len(acronyms)):\n",
+    "        txt=txt.replace(' ' + acronyms.acronym[i] + ' ',' ' + acronyms.replacement[i] + ' ')\n",
+    "    return txt"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "A function that will tokenize each report, remove the stop words, punctuation marks and make all the cases lower. <br>For this, the spaCy library was used."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 10,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def tokenizing_text(txt):\n",
+    "    tok=[]\n",
+    "    pom=txt.lower()\n",
+    "    pom=acronyms_to_words(pom)\n",
+    "    sp_pom=sp(pom)\n",
+    "    sp_pom=[x for x in sp_pom if not x.is_stop and x.is_alpha]\n",
+    "    for w in sp_pom:\n",
+    "        tok.append(w.lemma_)\n",
+    "    return tok"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "Below function is preparing each report in a list. First checking is it NaN, then is it in english (for this study only english reports were used). The function has a little catch, it has a boolean argument \"isRisk\" because beside of this set of classified reports, later, for other task, I will use expanded set of unclassified reports. So, if my set has a risk classification then I will use the argument \"True\" when calling my function, if not, \"False\" argument will be used.\n",
+    "Output of this function is DataFrame which contains identification number of each report (xx), tokenized content (txt) and (\"isRisk\") label of that report."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 11,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def prep_doc(document,isRisk,token):\n",
+    "    \n",
+    "    if isRisk :\n",
+    "        doc = pd.DataFrame(columns=['xx', 'report', 'label','factor', 'accident'])\n",
+    "    else:\n",
+    "        doc = pd.DataFrame(columns=['xx', 'report'])\n",
+    "    \n",
+    "    for i in range(len(document)):\n",
+    "       \n",
+    "        if isNaN(document.report[i]):\n",
+    "            continue\n",
+    "            \n",
+    "  # checking the languange with few lines below\n",
+    "  # if English and isRelible then continue the process and if not continue with the next report and go through the loop again\n",
+    "        isReliable, textBytesFound, details=cld2.detect(document.report[i])\n",
+    "        if not isReliable:\n",
+    "            continue\n",
+    "        if details[0][0]!='ENGLISH':\n",
+    "            continue\n",
+    "            \n",
+    "        txt=tokenizing_text(document.report[i])\n",
+    "       \n",
+    "#     Here it is important to know a little bit more about aviation risk classification.\n",
+    "#     These reports, according to predetermined parameters, are classified in line with \n",
+    "#     the risk factor given in the non-equidistant scale from 1 to 2500. \n",
+    "#     Considering this factor, there are 3 classes of events: \n",
+    "#         - No accident outcome -Minor injuries or damage - Major or catastrophic accident (including death)\n",
+    "#     We defined a feature \"accident\" that contain information about which of these 3 classes each report belong to.\n",
+    "#     This was the best way to have any proper and relevant data to classify.\n",
+    " \n",
+    "#     For better understanding next few lines look the AvioClass.jpg\n",
+    "        if isRisk :\n",
+    "            if (document.factor[i]==1):\n",
+    "                risk_level='no accident outcome'\n",
+    "            elif (document.factor[i] in (2,4,20,100)):\n",
+    "                risk_level='minor injuries or damage'\n",
+    "            else:\n",
+    "                risk_level='major or catastrophic accident'\n",
+    "            \n",
+    "            doc=doc.append({'xx': document.xx[i], 'report': txt, \n",
+    "                    'label': document.label[i], 'factor': document.factor[i],\n",
+    "                        'accident': risk_level},ignore_index=True)\n",
+    "        \n",
+    "        else:\n",
+    "            doc=doc.append({'xx': document.xx[i], 'report': txt}, ignore_index=True) \n",
+    "    return doc"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "Safety report text representation using TF-IDF <br>\n",
+    "There are a lot of open sources libraries for this, but to understand how TF-IDF works code it from scratch."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 12,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def TF_IDF_Data(doc):\n",
+    "    j=0\n",
+    "    br=-1\n",
+    "    tokens_list=[]\n",
+    "    tokens=pd.DataFrame()\n",
+    "    \n",
+    "#     for each document and each token in it, we made a combination doc-tok-number that represents:\n",
+    "#     \"In this document, this token has this TF-IDF number\"\n",
+    "#     Later, we can make a sparse matrix (dim.: DOC x TOK) from this DataFrame which will represent the same thing \n",
+    "   \n",
+    "    TD=pd.DataFrame(columns=['doc','tok','tf_idf']) \n",
+    "    n_data=len(doc)\n",
+    "    \n",
+    "    for i in range (n_data):\n",
+    "            \n",
+    "        br=br+1;\n",
+    "        tokenized_text=doc.report[i]\n",
+    "        n_tok=len(tokenized_text)\n",
+    "        \n",
+    "        if br==0:\n",
+    "            tokens_list=union(tokens_list,tokenized_text)\n",
+    "            for w in tokens_list:\n",
+    "                tokens[w]=0\n",
+    "            tokens.loc[0] = 0\n",
+    "            for w in tokens_list:\n",
+    "                nmb=tokenized_text.count(w)\n",
+    "                tokens.loc[[0],[w]] = tokens.loc[[0],[w]] + 1\n",
+    "                TD.loc[j]=0\n",
+    "                TD.doc[j] = doc.xx[i]\n",
+    "                TD.tok[j] = w\n",
+    "                TD.tf_idf[j] = nmb/n_tok\n",
+    "                j=j+1\n",
+    "        else:\n",
+    "            pom_tok=union([],tokenized_text)\n",
+    "            for w in pom_tok:\n",
+    "                nmb=tokenized_text.count(w)\n",
+    "                if w not in tokens_list:\n",
+    "                    tokens[w] = 0\n",
+    "                tokens.loc[[0],[w]] = tokens.loc[[0],[w]] + 1\n",
+    "                    \n",
+    "                TD.loc[j]=0\n",
+    "                TD.doc[j] = doc.xx[i]\n",
+    "                TD.tok[j] = w\n",
+    "                TD.tf_idf[j] = nmb/n_tok\n",
+    "                j=j+1\n",
+    "            tokens_list=union(tokens_list,pom_tok)\n",
+    "        \n",
+    "    N=br+1 \n",
+    "    for k in range (j):\n",
+    "        pom=TD.tf_idf[k]\n",
+    "        pom2 = TD.tok[k]\n",
+    "        df=pd.to_numeric(tokens[pom2])\n",
+    "        l =1+ N/df\n",
+    "        l = math.log(l)\n",
+    "        TD.tf_idf[k] = pom*l\n",
+    "        \n",
+    "    return(tokens,TD)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "Here is the function for sparse matrix"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 13,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def pdoc2sparsedf(pdoc):\n",
+    "    n=len(set(pdoc.tok))\n",
+    "    m=len(set(pdoc.doc))\n",
+    "    zero = np.zeros(shape=(m,n))\n",
+    "    df=pd.DataFrame(zero,columns=[list(set(pdoc.tok))],index=[list(set(pdoc.doc))])\n",
+    "    for i in range (len(pdoc)):\n",
+    "        a=[pdoc.doc[i]]\n",
+    "        b=[pdoc.tok[i]]\n",
+    "        df.loc[a,b]=pdoc.tf_idf[i]\n",
+    "    return df"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "This function is not necessary for this task. But later, we can check if the results are better this way (just exploring the data). What are we doing here? Just reducing the number of tokens that are meaningful for the task. For example, if one token appears only in small number of reports, maybe it is not of great importance.\n",
+    "Here is the example of reducing tokens only to ones that are appearing in 8 ore more reports, but you can choose and explore with any number of reports you want. \n",
+    "Function output are: new list of tokens with number of document appearance, new TF-IDF represantation (with all possible combinations found) and a list of excluded tokens."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 14,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def pdoc_reduced(pdoc,tokens, min_doc_appearance=8):\n",
+    "    new_pdoc = pd.DataFrame(columns=['doc','tok','tf_idf'])\n",
+    "    new_tokens = pd.DataFrame()\n",
+    "    ejected_tokens = []\n",
+    "    n=len(pdoc)\n",
+    "    \n",
+    "    for col in tokens.columns:\n",
+    "        if (tokens.loc[0][col] < min_doc_appearance):\n",
+    "            ejected_tokens.append(col)\n",
+    "            continue\n",
+    "        else:\n",
+    "            new_tokens[col]=0\n",
+    "            \n",
+    "    new_tokens.loc[0]=0        \n",
+    "    for col in new_tokens.columns:\n",
+    "        new_tokens.loc[0][col]=tokens.loc[0][col]\n",
+    "        \n",
+    "    br=0\n",
+    "    for i in range(n):\n",
+    "        \n",
+    "        if (pdoc.tok[i] in new_tokens.columns):\n",
+    "            new_pdoc.loc[br]=0\n",
+    "            new_pdoc.doc[br]=pdoc.doc[i]\n",
+    "            new_pdoc.tok[br]=pdoc.tok[i]\n",
+    "            new_pdoc.tf_idf[br]=pdoc.tf_idf[i]\n",
+    "            tf=len(pdoc[pdoc.doc==pdoc.doc[i]])\n",
+    "            br+=1\n",
+    "   \n",
+    "    for i in range(len(new_pdoc)):\n",
+    "        tf_idf=new_pdoc.tf_idf[i]\n",
+    "        tf_idf=(tf_idf * len(new_pdoc[new_pdoc.doc==new_pdoc.doc[i]])) / len(pdoc[pdoc.doc==pdoc.doc[i]])\n",
+    "        new_pdoc.tf_idf[i]=tf_idf\n",
+    "        \n",
+    "    return new_pdoc, new_tokens , ejected_tokens"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "It is time to use our functions:"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 23,
+   "metadata": {
+    "collapsed": true
+   },
+   "outputs": [
+    {
+     "ename": "NameError",
+     "evalue": "name 'np' is not defined",
+     "output_type": "error",
+     "traceback": [
+      "\u001b[0;31m---------------------------------------------------------------------------\u001b[0m",
+      "\u001b[0;31mNameError\u001b[0m                                 Traceback (most recent call last)",
+      "\u001b[0;32m<ipython-input-23-f9adae36304f>\u001b[0m in \u001b[0;36m<module>\u001b[0;34m\u001b[0m\n\u001b[1;32m     10\u001b[0m \u001b[0mpdoc_no_risk\u001b[0m\u001b[0;34m=\u001b[0m\u001b[0mpdoc_no_risk\u001b[0m\u001b[0;34m[\u001b[0m\u001b[0;36m1\u001b[0m\u001b[0;34m]\u001b[0m\u001b[0;34m\u001b[0m\u001b[0;34m\u001b[0m\u001b[0m\n\u001b[1;32m     11\u001b[0m \u001b[0;34m\u001b[0m\u001b[0m\n\u001b[0;32m---> 12\u001b[0;31m \u001b[0msparse_risk\u001b[0m\u001b[0;34m=\u001b[0m\u001b[0mpdoc2sparsedf\u001b[0m\u001b[0;34m(\u001b[0m\u001b[0mpdoc_risk\u001b[0m\u001b[0;34m)\u001b[0m\u001b[0;34m\u001b[0m\u001b[0;34m\u001b[0m\u001b[0m\n\u001b[0m\u001b[1;32m     13\u001b[0m \u001b[0msparse_no_risk\u001b[0m\u001b[0;34m=\u001b[0m\u001b[0mpdoc2sparsedf\u001b[0m\u001b[0;34m(\u001b[0m\u001b[0mpdoc_no_risk\u001b[0m\u001b[0;34m)\u001b[0m\u001b[0;34m\u001b[0m\u001b[0;34m\u001b[0m\u001b[0m\n",
+      "\u001b[0;32m<ipython-input-13-f678e0f270a4>\u001b[0m in \u001b[0;36mpdoc2sparsedf\u001b[0;34m(pdoc)\u001b[0m\n\u001b[1;32m      2\u001b[0m     \u001b[0mn\u001b[0m\u001b[0;34m=\u001b[0m\u001b[0mlen\u001b[0m\u001b[0;34m(\u001b[0m\u001b[0mset\u001b[0m\u001b[0;34m(\u001b[0m\u001b[0mpdoc\u001b[0m\u001b[0;34m.\u001b[0m\u001b[0mtok\u001b[0m\u001b[0;34m)\u001b[0m\u001b[0;34m)\u001b[0m\u001b[0;34m\u001b[0m\u001b[0;34m\u001b[0m\u001b[0m\n\u001b[1;32m      3\u001b[0m     \u001b[0mm\u001b[0m\u001b[0;34m=\u001b[0m\u001b[0mlen\u001b[0m\u001b[0;34m(\u001b[0m\u001b[0mset\u001b[0m\u001b[0;34m(\u001b[0m\u001b[0mpdoc\u001b[0m\u001b[0;34m.\u001b[0m\u001b[0mdoc\u001b[0m\u001b[0;34m)\u001b[0m\u001b[0;34m)\u001b[0m\u001b[0;34m\u001b[0m\u001b[0;34m\u001b[0m\u001b[0m\n\u001b[0;32m----> 4\u001b[0;31m     \u001b[0mzero\u001b[0m \u001b[0;34m=\u001b[0m \u001b[0mnp\u001b[0m\u001b[0;34m.\u001b[0m\u001b[0mzeros\u001b[0m\u001b[0;34m(\u001b[0m\u001b[0mshape\u001b[0m\u001b[0;34m=\u001b[0m\u001b[0;34m(\u001b[0m\u001b[0mm\u001b[0m\u001b[0;34m,\u001b[0m\u001b[0mn\u001b[0m\u001b[0;34m)\u001b[0m\u001b[0;34m)\u001b[0m\u001b[0;34m\u001b[0m\u001b[0;34m\u001b[0m\u001b[0m\n\u001b[0m\u001b[1;32m      5\u001b[0m     \u001b[0mdf\u001b[0m\u001b[0;34m=\u001b[0m\u001b[0mpd\u001b[0m\u001b[0;34m.\u001b[0m\u001b[0mDataFrame\u001b[0m\u001b[0;34m(\u001b[0m\u001b[0mzero\u001b[0m\u001b[0;34m,\u001b[0m\u001b[0mcolumns\u001b[0m\u001b[0;34m=\u001b[0m\u001b[0;34m[\u001b[0m\u001b[0mlist\u001b[0m\u001b[0;34m(\u001b[0m\u001b[0mset\u001b[0m\u001b[0;34m(\u001b[0m\u001b[0mpdoc\u001b[0m\u001b[0;34m.\u001b[0m\u001b[0mtok\u001b[0m\u001b[0;34m)\u001b[0m\u001b[0;34m)\u001b[0m\u001b[0;34m]\u001b[0m\u001b[0;34m,\u001b[0m\u001b[0mindex\u001b[0m\u001b[0;34m=\u001b[0m\u001b[0;34m[\u001b[0m\u001b[0mlist\u001b[0m\u001b[0;34m(\u001b[0m\u001b[0mset\u001b[0m\u001b[0;34m(\u001b[0m\u001b[0mpdoc\u001b[0m\u001b[0;34m.\u001b[0m\u001b[0mdoc\u001b[0m\u001b[0;34m)\u001b[0m\u001b[0;34m)\u001b[0m\u001b[0;34m]\u001b[0m\u001b[0;34m)\u001b[0m\u001b[0;34m\u001b[0m\u001b[0;34m\u001b[0m\u001b[0m\n\u001b[1;32m      6\u001b[0m     \u001b[0;32mfor\u001b[0m \u001b[0mi\u001b[0m \u001b[0;32min\u001b[0m \u001b[0mrange\u001b[0m \u001b[0;34m(\u001b[0m\u001b[0mlen\u001b[0m\u001b[0;34m(\u001b[0m\u001b[0mpdoc\u001b[0m\u001b[0;34m)\u001b[0m\u001b[0;34m)\u001b[0m\u001b[0;34m:\u001b[0m\u001b[0;34m\u001b[0m\u001b[0;34m\u001b[0m\u001b[0m\n",
+      "\u001b[0;31mNameError\u001b[0m: name 'np' is not defined"
+     ]
+    }
+   ],
+   "source": [
+    "doc_risk_tok=prep_doc(document_risk,'risk','tok') #tokenized data with risk\n",
+    "doc_no_risk_tok=prep_doc(document,'no risk','tok') #tokenized no risk data\n",
+    "\n",
+    "pdoc_risk=TF_IDF_Data(doc_risk_tok)\n",
+    "tokens_risk=pdoc_risk[0]\n",
+    "pdoc_risk=pdoc_risk[1]\n",
+    "\n",
+    "pdoc_no_risk=TF_IDF_Data(doc_no_risk_tok)\n",
+    "tokens_no_risk=pdoc_no_risk[0]\n",
+    "pdoc_no_risk=pdoc_no_risk[1]\n",
+    "\n",
+    "sparse_risk=pdoc2sparsedf(pdoc_risk)\n",
+    "sparse_no_risk=pdoc2sparsedf(pdoc_no_risk)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "We are going to save prepared new data:"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "doc_risk_tok.to_csv('./DATA/doc_risk_tok.csv')\n",
+    "doc_no_risk_tok.to_csv('./DATA/doc_no_risk_tok.csv')\n",
+    "pdoc_risk.to_csv('./DATA/pdoc_risk.csv')\n",
+    "tokens_risk.to_csv('./DATA/tokens_risk.csv')\n",
+    "pdoc_no_risk.to_csv('./DATA/pdoc_no_risk.csv')\n",
+    "tokens_no_risk.to_csv('./DATA/tokens_no_risk.csv')\n",
+    "sparse_risk.to_csv('./DATA/sparse_risk.csv')\n",
+    "sparse_no_risk.to_csv('./DATA/sparse_no_risk.csv')"
+   ]
+  }
+ ],
+ "metadata": {
+  "kernelspec": {
+   "display_name": "Python 3",
+   "language": "python",
+   "name": "python3"
+  },
+  "language_info": {
+   "codemirror_mode": {
+    "name": "ipython",
+    "version": 3
+   },
+   "file_extension": ".py",
+   "mimetype": "text/x-python",
+   "name": "python",
+   "nbconvert_exporter": "python",
+   "pygments_lexer": "ipython3",
+   "version": "3.7.9"
+  }
+ },
+ "nbformat": 4,
+ "nbformat_minor": 4
+}
