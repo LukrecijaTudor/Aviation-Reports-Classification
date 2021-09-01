@@ -1,5 +1,17 @@
 # Aviation-Reports-Classification
 
-Code for graduate thesis "Risk prediction and aviation safety report classification using NLP methods, RF and BERT"
+Code exhibited is a part of my master's thesis: Risk prediction and aviation safety report classification using Natural Language Processing (NLP), Random Forest (RF), and Bidirectional Encoder Representations (BERT) methodology. 
 
-I have a set of just under 3000 aviation reports of which every one of them contains informations about irregularities of one flight (if there was any) and potencial risk level of that flight caused by stated irregularities. Final goal is to predict which class the new report belongs to. In short, a supervised classification problem. In this code I represent cleaning the data and restructuring the data into new classes that better fits to model but still represents the same relationships between classes. For this task, text classification, I used NLP (Natural Language Processing) methods. Beside data cleaning and restructuring,what needs to be done is text preparation for model. I used two different text representations, one is called TF-IDF (Term Frequency - Inverse Document Frequency) and is used to perform the RF (Random Forest) classification model and the other is already included in BERT classification model (represented by Google in 2018.) Through thic code I will represent you my results with these two models.
+The dataset was relatively small, with just about 3000 aviation safety reports. 
+The data used for model development were the description of the occurrence (free-form text) and the elements of event risk level classification.
+
+The goal was to develop and compare supervised machine-learning models for predicting occurrence safety risk classification.
+
+The project includes report narratives pre-processing, restructuring the risk level classification (to better fits target goal but still maintaining the given relationship between occurrence risk level classification), two different text representations (Term Frequency - Inverse Document Frequency and BERT), and two classification models (Random Forest and BERT). 
+
+Models are evaluated using standard measures (Precision, Recall, and F1-score) and presented in the Confusion Matrix.
+
+The root causes for relative poor results are analyzed and discussed.
+
+
+
